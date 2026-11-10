@@ -82,32 +82,39 @@ Our ablation demonstrates that while the 1D-CNN student achieves superior effici
 
 ```text
 GWO-Optimized-KD-MIMIC-IV/
-├── data_pipeline/
-│   ├── extract_mimic_iv.py        # Cohort selection & table extraction (84,881 stays)
-│   ├── sepsis3_labeling.py        # Hybrid ICD + SOFA Sepsis-3 labeling
-│   ├── feature_engineering.py     # 12-h sliding window, forward-fill, Z-score normalization
-│   └── extract_eicu.py            # Zero-shot external validation cohort prep (165,524 stays)
+├── 00_extract.py                   # Stage 0: MIMIC-IV v3.1 cohort & hourly feature extraction (DuckDB)
+├── 01_labeling.py                  # Stage 1: Sepsis-3 hybrid labeling (ICD OR SOFA ≥2 + suspected infection)
+├── 02_features.py                  # Stage 2: Imputation, clipping, Z-score, 12-h sliding windows
+├── 03_split.py                     # Stage 3: Patient-level 70/15/15 stratified split
+├── 04_teacher.py                   # Stage 4: Teacher training & selection (BiLSTM+Attn vs TCN)
+├── 05_screening.py                 # Stage 5: Student backbone screening (Pareto: AUROC, size, latency)
+├── 06_gwo_kd.py                    # Stage 6: GWO search over (T, α_KD, β_KD, s) + full distillation
+├── 07_baselines.py                 # Stage 7: Metaheuristic (PSO, GA, WOA) & KD baselines (Vanilla KD, FitNet, AT)
+├── 07_recovery.py                  # Stage 7 resume: completes interrupted WOA seeds, Wilcoxon & DeLong tests
+├── 08_sota_baselines.py            # Stage 8: XGBoost, LightGBM, Vanilla LSTM, Simple TCN, RETAIN
+├── 09_ablation.py                  # Stage 9: Ablations (KD weights/temperature, loss components, GWO config)
+├── 09c_gwo_remaining.py            # Stage 9(c): remaining GWO configuration grid (N_w, I_max)
+├── 10_evaluate.py                  # Stage 10: Final results tables, ROC/PR curves, eICU external validation
+├── eicu_extract.py                 # eICU-CRD v2.0 extraction for zero-shot external validation
+├── clinical_baselines.py           # Rule-based SOFA, MEWS, NEWS2 scores on the same test split
+├── delong_clinical_baselines.py    # DeLong test: GWO-KD vs SOFA / MEWS / NEWS2
+├── label_sensitivity.py            # Label sensitivity: ICD-only vs clinical-only vs hybrid
+├── finish_ablation_c.py            # Remaining GWO configuration ablation points (N_w=30, I_max=20/50)
+├── benchmark_speedup.py            # Micro-benchmark of GWO speedup strategies (device, parallelism, DataLoader)
+├── config.py                       # Global paths, feature lists, hyperparameter bounds, seeds
+├── __init__.py
 ├── models/
-│   ├── teachers.py                # TCN and BiLSTM+Attention teacher architectures
-│   ├── students.py                # S1 (TinyLSTM), S2 (1D-CNN), S3 (CompactGRU), S4, S5
-│   └── baselines.py               # RETAIN, Vanilla LSTM, Simple TCN, XGBoost, LightGBM
-├── distillation/
-│   ├── kd_losses.py               # Response (KL), Feature (MSE + linear regressor), FitNet, AT
-│   └── trainer.py                 # 4-phase teacher-student training & fine-tuning loop
-├── optimizers/
-│   ├── gwo.py                     # Grey Wolf Optimizer over (T, alpha_KD, beta_KD, s)
-│   └── metaheuristics.py          # PSO, GA, and WOA benchmark implementations
-├── evaluation/
-│   ├── metrics.py                 # AUROC, AUPRC, Youden/Clinical thresholds, bootstrap CIs
-│   ├── statistical_tests.py       # DeLong's test, Wilcoxon signed-rank, Holm-Bonferroni
-│   ├── clinical_scores.py         # Rule-based SOFA, MEWS, NEWS2 calculators
-│   └── latency_benchmark.py       # Single-stream CPU latency profiler
-├── configs/
-│   └── default_config.yaml        # Hyperparameter bounds, seeds, and split ratios
-├── requirements.txt
+│   ├── teacher.py                  # BiLSTM + temporal self-attention and dilated TCN teachers
+│   └── students.py                 # S1 (TinyLSTM), S2 (1D-CNN), S3 (CompactGRU), S4, S5
+├── utils/
+│   ├── __init__.py
+│   ├── data_utils.py               # Dataset/DataLoader helpers with class-weighted sampling
+│   ├── gwo.py                      # Grey Wolf Optimizer (Algorithm 1)
+│   └── metrics.py                  # AUROC, AUPRC, bootstrap CI, DeLong, Wilcoxon, Holm–Bonferroni
 └── README.md
 ```
-*(Note: Adjust folder and script names above to match your exact local file structure before pushing).*
+
+Scripts are numbered in execution order (`00` → `10`). Data paths are set in `config.py`; raw MIMIC-IV (`icu/`, `hosp/`) and eICU-CRD (`eicu-crd/2.0/`) tables are expected one level above this folder, and outputs are written to `processed/`, `splits/`, `checkpoints/`, `results/`, and `logs/`.
 
 ---
 
