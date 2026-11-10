@@ -114,51 +114,83 @@ GWO-Optimized-KD-MIMIC-IV/
 └── README.md
 ```
 
-Scripts are numbered in execution order (`00` → `10`). Data paths are set in `config.py`; raw MIMIC-IV (`icu/`, `hosp/`) and eICU-CRD (`eicu-crd/2.0/`) tables are expected one level above this folder, and outputs are written to `processed/`, `splits/`, `checkpoints/`, `results/`, and `logs/`.
+Scripts are numbered in execution order (`00` → `10`). All data and output paths are defined in `config.py`; see [Getting Started](#getting-started) for the expected folder layout.
 
 ---
 
 ## Getting Started
 
 ### 1. Prerequisites & Data Access
-Both **MIMIC-IV v3.1** and **eICU-CRD v2.0** are restricted-access clinical databases hosted on PhysioNet. To run the data extraction pipeline:
+Both **MIMIC-IV v3.1** and **eICU-CRD v2.0** are restricted-access clinical databases hosted on PhysioNet. To run the pipeline:
 1. Complete the required CITI "Data or Specimens Only Research" training.
 2. Sign the Data Use Agreement (DUA) on PhysioNet for [MIMIC-IV v3.1](https://physionet.org/content/mimiciv/3.1/) and [eICU-CRD v2.0](https://physionet.org/content/eicu-crd/2.0/).
-3. Download the raw CSV/Parquet tables into your local `data/raw/` directory.
+3. Place the raw tables in the **parent folder of this repository**, as expected by `config.py` (`BASE_DIR` = one level above the scripts):
+
+```text
+<project-root>/
+├── icu/                         # MIMIC-IV icu module (icustays.csv, chartevents.csv, inputevents.csv, outputevents.csv)
+├── hosp/                        # MIMIC-IV hosp module (admissions.csv, patients.csv, diagnoses_icd.csv, labevents.csv,
+│                                #   prescriptions.csv, microbiologyevents.csv)
+├── eicu-crd/2.0/                # eICU-CRD tables (*.csv.gz)
+├── processed/  splits/  checkpoints/  results/  logs/   # created automatically by config.py
+└── GWO-Optimized-KD-MIMIC-IV/   # this repository
+```
+
+> MIMIC-IV tables are read as uncompressed `.csv`; eICU-CRD tables are read directly as `.csv.gz`. Edit the paths in `config.py` if your layout differs.
 
 ### 2. Installation
-Clone the repository and install the dependencies:
+Clone the repository inside `<project-root>` and install the dependencies (Python ≥ 3.10):
 
 ```bash
-git clone [https://github.com/windraswastika/GWO-Optimized-KD-MIMIC-IV.git](https://github.com/windraswastika/GWO-Optimized-KD-MIMIC-IV.git)
+cd <project-root>
+git clone https://github.com/windraswastika/GWO-Optimized-KD-MIMIC-IV.git
 cd GWO-Optimized-KD-MIMIC-IV
 pip install -r requirements.txt
 ```
 
 ### 3. Reproducing the Experiments
+Run the scripts from inside the repository folder, in numerical order. Default hyperparameters, seeds, and GWO bounds are defined in `config.py`.
 
-**Step 1: Cohort Extraction & Feature Engineering**
+**Step 1: Data preparation (MIMIC-IV)**
 ```bash
-python data_pipeline/extract_mimic_iv.py --input_dir /path/to/mimic-iv-3.1 --output_dir data/processed/mimic
-python data_pipeline/feature_engineering.py --data_dir data/processed/mimic --window_size 12 --step 1 --seed 42
+python 00_extract.py        # cohort + hourly feature table
+python 01_labeling.py       # Sepsis-3 hybrid labels
+python 02_features.py       # imputation, clipping, Z-score, 12-h sliding windows
+python 03_split.py          # patient-level 70/15/15 split
 ```
 
-**Step 2: Train Frozen Teacher Model (TCN)**
+**Step 2: Teacher training and student screening**
 ```bash
-python distillation/trainer.py --phase train_teacher --teacher tcn --seed 42
+python 04_teacher.py --model both          # BiLSTM+Attn and TCN; best saved as checkpoints/teacher_best.pt
+python 05_screening.py --students 1 2 3 4 5
 ```
 
-**Step 3: Run GWO-Guided Knowledge Distillation**
+**Step 3: GWO-guided knowledge distillation**
 ```bash
-python distillation/trainer.py --phase gwo_search --n_wolves 10 --max_iter 10 --seeds 5
-python distillation/trainer.py --phase full_distill --arch s2_1dcnn --temp 10.12 --alpha 0.90 --beta 0.368 --seed 42
+python 06_gwo_kd.py --gwo_n_wolves 10 --gwo_i_max 10
 ```
 
-**Step 4: Evaluate & Run Ablations / External Validation**
+**Step 4: Baselines**
 ```bash
-python evaluation/metrics.py --model_path checkpoints/gwo_kd_s2_best.pt --test_split internal
-python evaluation/metrics.py --model_path checkpoints/gwo_kd_s2_best.pt --test_split eicu_external
+python 07_baselines.py                     # PSO/GA/WOA + Vanilla KD, FitNet, AT (--skip_meta / --skip_kd)
+python 08_sota_baselines.py                # XGBoost, LightGBM, LSTM, Simple TCN, RETAIN
+python clinical_baselines.py               # SOFA, MEWS, NEWS2
+python delong_clinical_baselines.py        # DeLong: GWO-KD vs clinical scores
 ```
+
+**Step 5: Ablation and sensitivity analyses**
+```bash
+python 09_ablation.py --parts a b c d
+python label_sensitivity.py --checkpoint ../checkpoints/teacher_best.pt
+```
+
+**Step 6: External validation and final evaluation**
+```bash
+python eicu_extract.py                     # eICU-CRD zero-shot cohort
+python 10_evaluate.py --dataset all        # MIMIC-IV test set + eICU-CRD
+```
+
+Optional/resume utilities: `07_recovery.py` (resumes interrupted WOA seeds; update the hard-coded path on line 3 and 20 before use), `09c_gwo_remaining.py` and `finish_ablation_c.py` (remaining GWO configuration grid points), and `benchmark_speedup.py` (GWO speedup micro-benchmark).
 
 ---
 
@@ -180,7 +212,7 @@ If you find this repository or our empirical findings useful in your research, p
   author={Swastika, Windra and Kristianto, Heri},
   journal={Manuscript submitted for publication},
   year={2026},
-  url={[https://github.com/windraswastika/GWO-Optimized-KD-MIMIC-IV](https://github.com/windraswastika/GWO-Optimized-KD-MIMIC-IV)}
+  url={https://github.com/windraswastika/GWO-Optimized-KD-MIMIC-IV}
 }
 ```
 
